@@ -1,0 +1,6 @@
+[plugininstall] 
+description=WCX Packer extension (plug-in) example for TotalCommander in Golang
+type=wcx
+file=totalcmd-wcx-demo-go.wcx
+defaultextension=test
+defaultdir=totalcmd-wcx-demo-go
