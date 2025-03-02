@@ -1,78 +1,17 @@
 package main
 
 /*
-#include <stdio.h>
-#include <string.h>
-
-typedef struct {
-    char* ArcName;
-    int OpenMode;
-    int OpenResult;
-    char* CmtBuf;
-    int CmtBufSize;
-    int CmtSize;
-    int CmtState;
-  } TOpenArchiveData;
-
-typedef struct {
-    char ArcName[260];
-    char FileName[260];
-    int Flags;
-    int PackSize;
-    int UnpSize;
-    int HostOS;
-    int FileCRC;
-    int FileTime;
-    int UnpVer;
-    int Method;
-    int FileAttr;
-    char* CmtBuf;
-    int CmtBufSize;
-    int CmtSize;
-    int CmtState;
-  } THeaderData;
-
-__attribute__((weak))
-void fill_zero(void *buffer) {
-    printf("str_size %d \n", sizeof(THeaderData));
-    THeaderData* obj = (THeaderData*)(buffer);
-    printf("ptr 0x%x  %d  %d \n", buffer, buffer, &obj);
-    printf("ArcName %d %s \n", &obj->ArcName, obj->ArcName);
-    printf("FileName %d %s \n", &obj->FileName, obj->FileName);
-    printf("Flags %d %d \n", &obj->Flags, obj->Flags);
-    printf("PackSize %d %d \n", &obj->PackSize, obj->PackSize);
-    printf("UnpSize %d %d \n", &obj->UnpSize, obj->UnpSize);
-    printf("HostOS %d %d \n", &obj->HostOS, obj->HostOS);
-    printf("FileCRC %d %d \n", &obj->FileCRC, obj->FileCRC);
-    printf("FileTime %d %d \n", &obj->FileTime, obj->FileTime);
-    printf("UnpVer %d %d \n", &obj->UnpVer, obj->UnpVer);
-    printf("Method %d %d \n", &obj->Method, obj->Method);
-    printf("FileAttr %d %d \n", &obj->FileAttr, obj->FileAttr);
-    printf("CmtBuf %d \n", &obj->CmtBuf);
-    printf("CmtBufSize %d %d \n", &obj->CmtBufSize, obj->CmtBufSize);
-    printf("CmtSize %d %d \n", &obj->CmtSize, obj->CmtSize);
-    printf("CmtState %d %d \n", &obj->CmtState, obj->CmtState);
-    memset(obj, 0, sizeof(THeaderData));
-    //strncpy((char *)obj->ArcName, "hello", 260);
-    obj->Flags = 3;
-    obj->PackSize = 4;
-    obj->UnpSize = 5;
-    obj->FileAttr = 0x20;
-    obj->CmtSize = 43;
-    obj->CmtBufSize = 44;
-}
+#include "totalcmd/wcxhead.h"
 */
 import "C"
 import (
 	"fmt"
 	"os"
+	"time"
 	"totalcmd-wcx-demo-go/totalcmd"
-	"unsafe"
 )
 
-// var openedFilesMap = map[uintptr]*os.File{}
 var openedFilesMap = make(map[uintptr]*os.File)
-
 var testFileCounter = 4
 
 /*
@@ -87,13 +26,8 @@ OpenArchive
 	    ArchiveData to some location that can be accessed via the handle.
 */
 //export OpenArchive
-func OpenArchive(pArchiveData *C.TOpenArchiveData) uintptr {
-	//archiveData := (*totalcmd.TOpenArchiveData)(pArchiveData)
-	//archiveData := (*C.TOpenArchiveData)(pArchiveData)
-	//archiveData := &pArchiveData
-
+func OpenArchive(pArchiveData *C.tOpenArchiveData) uintptr {
 	filename := C.GoString((*C.char)(pArchiveData.ArcName))
-
 	fmt.Println("OpenArchive", filename, pArchiveData)
 
 	file, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
@@ -126,6 +60,22 @@ func SetChangeVolProc(hArcData uintptr, pChangeVolProc1 uintptr) {
 }
 
 /*
+SetProcessDataProc
+
+	This function allows you to notify user about the progress when you un/pack files.
+
+	void __stdcall SetProcessDataProc (HANDLE hArcData, tProcessDataProc pProcessDataProc);
+
+	pProcessDataProc contains a pointer to a function that you may want to call when notifying user about the progress
+	being made when you pack or extract files from an archive. You need to store the value at some place if you want to use it;
+	you can use hArcData that you have returned by OpenArchive to identify that place.
+*/
+//export SetProcessDataProc
+func SetProcessDataProc(hArcData uintptr, pProcessDataProc uintptr) {
+	fmt.Println("SetProcessDataProc")
+}
+
+/*
 ReadHeader
 
 		Totalcmd calls ReadHeader to find out what files are in the archive.
@@ -144,74 +94,40 @@ ReadHeader
 	    Totalcmd will use this information to display content of the archive when the archive is viewed as a directory.
 */
 //export ReadHeader
-func ReadHeader(hArcData uintptr, pHeaderData *C.THeaderData) C.int {
+func ReadHeader(hArcData uintptr, pHeaderData *C.tHeaderData) C.int {
+	if hArcData == 0 || pHeaderData == nil {
+		return totalcmd.E_EREAD
+	}
+
 	file := openedFilesMap[hArcData]
-	fmt.Println("ReadHeader", file.Name(), testFileCounter, pHeaderData)
+	fmt.Println("ReadHeader", file.Name(), testFileCounter)
 
-	//headerData := (*totalcmd.THeaderData)(pHeaderData)
-	//headerData := (*C.THeaderData)(pHeaderData)
-	//headerData := (*c_structs.THeaderData)(pHeaderData)
+	fileName := "example.txt"
 
-	//var s string = C.GoStringN((*C.char)(&pHeaderData.FileName), 260)
+	C.strncpy(&pHeaderData.FileName[0], C.CString(fileName), C.size_t(len(fileName)))
+	pHeaderData.PackSize = 42
+	pHeaderData.UnpSize = 73
+	pHeaderData.FileCRC = 0x12345678
 
-	structSize := unsafe.Sizeof(*pHeaderData)
-	fmt.Println("-- ssize", structSize)
+	// (year - 1980) << 25 | month << 21 | day << 16 | hour << 11 | minute << 5 | second/2
+	//Make sure that:
+	//year is in the four digit format between 1980 and 2100
+	//month is a number between 1 and 12
+	//hour is in the 24 hour format
+	fileTime := time.Now()
+	pHeaderData.FileTime = C.uint((fileTime.Year()-1980)<<25 | int(fileTime.Month())<<21 | fileTime.Day()<<16 | fileTime.Hour()<<11 | fileTime.Minute()<<5 | fileTime.Second()/2)
 
-	poi := unsafe.Pointer(pHeaderData)
-	C.fill_zero(poi)
-
-	//cFileName := (*C.char)(unsafe.Pointer(&pHeaderData.FileName))
-	// var s string = C.GoStringN(cFileName, 260)
-	//slice := unsafe.Slice((*C.char)(pHeaderData).FileName, 260)
-	//s := string(slice)
-	//fmt.Println("-- Filename", s)
-	fmt.Println("-- Size", pHeaderData.UnpSize)
-
-	//headerData := (*totalcmd.tHeaderData)(pHeaderData)
-	//headerData.UnpSize = C.int(42)
-	//headerData.PackSize = C.int(42)
-	//headerData.CmtSize = C.int(42)
-
-	// filename := C.GoString((*C.char)(archiveData.ArcName))
-
-	//buf := make([]byte, 256)
-	//C.test((*C.char)(unsafe.Pointer(&buf[0])), C.int(len(buf)))
-
-	//mySlice := unsafe.Slice((*byte)(unsafe.Pointer(&headerData.FileName)), 256)
-	// and if you need an array type, the slice can be converted
-	//myArray := ([256]byte)(mySlice)
-
-	//fmt.Println("-- ArcName", C.GoString((*C.char)(&headerData.FileName[0])))
-
-	//var arr [256]byte
-	//copy(arr[:], C.GoBytes(unsafe.Pointer(&C.my_buf), C.BUF_SIZE))
-	//copy(headerData.FileName, C.GoBytes(unsafe.Pointer(&headerData.FileName), 256))
-
-	//fmt.Println("-- ArcName", *(*[256]C.char)(unsafe.Pointer(headerData.FileName)))
-	//fmt.Println("-- Flags", headerData.Flags)
-	//fmt.Println("-- Size", int(headerData.UnpSize))
-
-	//binary.Write(headerData.ArcName, binary.LittleEndian, data)
-	//headerData.ArcName
-	//headerData.ArcName = C.GoString()
-	//C.strcpy((*C.char)(unsafe.Pointer(&headerData.ArcName[0])), (*C.char)(unsafe.Pointer(&bts[0])))
-
-	// fmt.Println("ReadHeader", unsafe.Slice(&headerData.FileName, len(headerData.FileName)))
+	pHeaderData.Method = 0 // Compression method (0 - no compression)
+	pHeaderData.FileAttr = totalcmd.READ_ONLY | totalcmd.ARCHIVE
+	pHeaderData.Flags = 0 // Флаги (можно задать при необходимости)
+	pHeaderData.CmtSize = 0
+	pHeaderData.CmtState = 0
 
 	testFileCounter -= 1
 	if testFileCounter <= 0 {
 		return totalcmd.E_END_ARCHIVE
 	}
 	return totalcmd.SUCCESS
-}
-
-func strcpyToC(dst *C.char, src string) {
-	n := len(src)
-
-	ds := unsafe.Slice((*byte)(unsafe.Pointer(dst)), n+1)
-
-	copy(ds, src)
-	ds[n] = 0
 }
 
 /*
@@ -242,34 +158,12 @@ ProcessFile
 */
 //export ProcessFile
 func ProcessFile(hArcData uintptr, operation int, destPath *C.char, destName *C.char) int {
-	const (
-		PK_SKIP    = 0
-		PK_TEST    = 1
-		PK_EXTRACT = 2
-	)
-
 	var path = C.GoString(destPath)
 	var name = C.GoString(destName)
 	fmt.Println()
 	fmt.Println("-- ProcessFile", operation, path, name)
 
 	return totalcmd.SUCCESS
-}
-
-/*
-SetProcessDataProc
-
-	This function allows you to notify user about the progress when you un/pack files.
-
-	void __stdcall SetProcessDataProc (HANDLE hArcData, tProcessDataProc pProcessDataProc);
-
-	pProcessDataProc contains a pointer to a function that you may want to call when notifying user about the progress
-	being made when you pack or extract files from an archive. You need to store the value at some place if you want to use it;
-	you can use hArcData that you have returned by OpenArchive to identify that place.
-*/
-//export SetProcessDataProc
-func SetProcessDataProc(hArcData uintptr, pProcessDataProc uintptr) {
-	fmt.Println("SetProcessDataProc")
 }
 
 /*
@@ -296,7 +190,7 @@ func CloseArchive(hArcData uintptr) int {
 			}
 		}
 
-		defer closeF() // defer
+		defer closeF()
 		delete(openedFilesMap, hArcData)
 		fmt.Println("CloseArchive success")
 		return totalcmd.SUCCESS
@@ -309,5 +203,3 @@ func CloseArchive(hArcData uintptr) int {
 func main() {
 	// Need a main function to make CGO compile package as C shared library
 }
-
-// go build -tags lib -buildmode=c-shared -o golib.a main.go

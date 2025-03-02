@@ -1,6 +1,6 @@
 ﻿.idea/
+build/
 _obj/
-*.h
 *.dll
 *.wcx
 *.wcx64
